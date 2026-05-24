@@ -1,0 +1,9 @@
+services:
+  std-bot:
+    image: ghcr.io/ptinkler/std-bot:latest
+    user: "${UID:-1000}:${GID:-1000}"
+    pull_policy: always
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
