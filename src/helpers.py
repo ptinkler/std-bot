@@ -6,6 +6,26 @@ import discord
 
 from models import PollData
 
+WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def parse_weekday(s: str) -> int | None:
+    s = s.strip().lower()
+    mapping: dict[str, int] = {}
+    for i, name in enumerate(WEEKDAY_NAMES):
+        mapping[name.lower()] = i
+        mapping[name[:3].lower()] = i
+        mapping[str(i)] = i
+    return mapping.get(s)
+
+
+def next_week_dates() -> list[int]:
+    """Mon–Sun of next ISO week as midnight UTC timestamps."""
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    days_until_monday = (7 - today.weekday()) % 7 or 7
+    next_monday = today + timedelta(days=days_until_monday)
+    return [int((next_monday + timedelta(days=i)).timestamp()) for i in range(7)]
+
 
 def upcoming_days(count: int = 25) -> list[int]:
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -43,6 +63,14 @@ def date_label(ts: int) -> str:
 def fmt_date(ts: int) -> str:
     dow = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%A")
     return f"{dow}, <t:{ts}:D> (<t:{ts}:R>)"
+
+
+def build_closed_poll_embed(poll: PollData) -> discord.Embed:
+    return discord.Embed(
+        title=f"📅 {poll.event_name} — Poll Closed",
+        description="This weekly poll has closed. A new one has been posted.",
+        color=discord.Color.dark_gray(),
+    )
 
 
 def build_poll_embed(poll: PollData, finalized_ts: int | None = None) -> discord.Embed:

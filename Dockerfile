@@ -7,4 +7,4 @@ COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 ENV PYTHONPATH=/app/src
-CMD [".venv/bin/python", "src/main.py"]
+CMD [".venv/bin/sh", "-c", ".venv/bin/alembic upgrade head && .venv/bin/python src/main.py"]

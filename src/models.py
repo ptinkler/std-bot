@@ -2,6 +2,26 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class RecurringPollConfig:
+    event_name: str
+    description: str
+    creator_id: int
+    guild_id: int
+    channel_id: int
+    post_weekday: int   # 0=Mon … 6=Sun
+    post_hour: int
+    post_minute: int
+    post_timezone: str  # IANA key
+    last_posted_week: str | None = None
+    last_poll_msg_id: int | None = None
+    mention_role_id: int | None = None
+    id: int | None = None
+
+
+active_recurring_configs: dict[int, RecurringPollConfig] = {}  # id -> config
+
+
+@dataclass
 class PollData:
     event_name: str
     description: str
