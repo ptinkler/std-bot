@@ -175,6 +175,8 @@ class ManageRecurringView(discord.ui.View):
         config_id = int(self.poll_select.values[0])
         self.selected = next((c for c in self.configs if c.id == config_id), None)
         self.cancel_btn.disabled = False
+        for opt in self.poll_select.options:
+            opt.default = opt.value == str(config_id)
         day_name = WEEKDAY_NAMES[self.selected.post_weekday]
         await interaction.response.edit_message(
             content=f"Selected: **{self.selected.event_name}** — every {day_name} at {self.selected.post_hour:02d}:{self.selected.post_minute:02d}",
