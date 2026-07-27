@@ -11,12 +11,11 @@ WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturd
 
 def parse_weekday(s: str) -> int | None:
     s = s.strip().lower()
-    mapping: dict[str, int] = {}
     for i, name in enumerate(WEEKDAY_NAMES):
-        mapping[name.lower()] = i
-        mapping[name[:3].lower()] = i
-        mapping[str(i)] = i
-    return mapping.get(s)
+        n = name.lower()
+        if s == n or s == str(i) or (len(s) >= 2 and n.startswith(s)):
+            return i
+    return None
 
 
 def next_week_dates() -> list[int]:

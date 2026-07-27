@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from bot_instance import bot
-from helpers import WEEKDAY_NAMES, build_closed_poll_embed, build_poll_embed, date_label, fmt_date, parse_time, upcoming_days
+from helpers import WEEKDAY_NAMES, build_closed_poll_embed, build_poll_embed, date_label, fmt_date, parse_time, parse_weekday, upcoming_days
 from models import TIMEZONES, PollData, RecurringPollConfig, active_polls, active_recurring_configs
 from persistence import delete_poll, delete_recurring, save_poll, save_recurring
 
@@ -35,9 +35,6 @@ class PollTypeView(discord.ui.View):
         await interaction.response.send_message("Manage recurring polls:", view=view, ephemeral=True)
 
 
-WEEKDAY_ABBREVS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-
 class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"):
     event_name = discord.ui.TextInput(label="Poll Name", max_length=100, placeholder="e.g. Weekly Game Night")
     description = discord.ui.TextInput(
@@ -46,85 +43,75 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
         max_length=300,
         style=discord.TextStyle.paragraph,
     )
+    post_day = discord.ui.TextInput(
+        label="Post on which day?",
+        placeholder="e.g. Thursday, Thurs, Thu",
+        max_length=20,
+    )
     post_time_input = discord.ui.TextInput(
         label="Post at what time? (UTC)",
-        placeholder="e.g. 18:00 or 6:00 PM",
+        placeholder="e.g. 18:00, 1800, or 6:00 PM",
         max_length=15,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
+        weekday = parse_weekday(str(self.post_day))
+        if weekday is None:
+            await interaction.response.send_message(
+                "Couldn't parse day. Use e.g. `Monday`, `Mon`, `Thurs`.", ephemeral=True
+            )
+            return
         t = parse_time(str(self.post_time_input))
         if t is None:
             await interaction.response.send_message(
-                "Couldn't parse time. Use `18:00`, `1800`, `18`, or `6:00 PM`.", ephemeral=True
+                "Couldn't parse time. Use e.g. `18:00`, `1800`, or `6:00 PM`.", ephemeral=True
             )
             return
-        view = RecurringDayRoleView(
+        view = RecurringRoleConfirmView(
             event_name=str(self.event_name),
             description=str(self.description or ""),
             creator_id=interaction.user.id,
             guild_id=interaction.guild_id,
             channel_id=interaction.channel_id,
+            post_weekday=weekday,
             post_hour=t.hour,
             post_minute=t.minute,
         )
+        day_name = WEEKDAY_NAMES[weekday]
         await interaction.response.send_message(
-            f"**{self.event_name}** — posts at **{t.hour:02d}:{t.minute:02d} UTC**.\nPick the day and optional role ping:",
+            f"**{self.event_name}** — every **{day_name}** at **{t.hour:02d}:{t.minute:02d} UTC**\nOptionally ping a role, then confirm:",
             view=view,
             ephemeral=True,
         )
 
 
-class RecurringDayRoleView(discord.ui.View):
-    def __init__(self, event_name, description, creator_id, guild_id, channel_id, post_hour, post_minute):
+class RecurringRoleConfirmView(discord.ui.View):
+    def __init__(self, event_name, description, creator_id, guild_id, channel_id, post_weekday, post_hour, post_minute):
         super().__init__(timeout=300)
         self.event_name = event_name
         self.description = description
         self.creator_id = creator_id
         self.guild_id = guild_id
         self.channel_id = channel_id
+        self.post_weekday = post_weekday
         self.post_hour = post_hour
         self.post_minute = post_minute
-        self.selected_weekday: int | None = None
         self.selected_role_id: int | None = None
-
-        weekday_options = [
-            discord.SelectOption(label=abbr, value=str(i))
-            for i, abbr in enumerate(WEEKDAY_ABBREVS)
-        ]
-        self.weekday_select = discord.ui.Select(
-            placeholder="Which day to post?", options=weekday_options, row=0
-        )
-        self.weekday_select.callback = self._on_weekday
-        self.add_item(self.weekday_select)
 
         self.role_select = discord.ui.RoleSelect(
             placeholder="Mention a role when posting? (optional)",
             min_values=0,
             max_values=1,
-            row=1,
+            row=0,
         )
         self.role_select.callback = self._on_role
         self.add_item(self.role_select)
 
         self.confirm_btn = discord.ui.Button(
-            label="Confirm & Save", style=discord.ButtonStyle.success, disabled=True, row=2
+            label="Confirm & Save", style=discord.ButtonStyle.success, row=1
         )
         self.confirm_btn.callback = self._on_confirm
         self.add_item(self.confirm_btn)
-
-    async def _on_weekday(self, interaction: discord.Interaction):
-        self.selected_weekday = int(self.weekday_select.values[0])
-        self.confirm_btn.disabled = False
-        day_abbr = WEEKDAY_ABBREVS[self.selected_weekday]
-        role_part = f" • pings <@&{self.selected_role_id}>" if self.selected_role_id else ""
-        await interaction.response.edit_message(
-            content=(
-                f"**{self.event_name}** — posts every **{day_abbr}** at "
-                f"**{self.post_hour:02d}:{self.post_minute:02d} UTC**{role_part}\nReady to save?"
-            ),
-            view=self,
-        )
 
     async def _on_role(self, interaction: discord.Interaction):
         self.selected_role_id = self.role_select.values[0].id if self.role_select.values else None
@@ -137,7 +124,7 @@ class RecurringDayRoleView(discord.ui.View):
             creator_id=self.creator_id,
             guild_id=self.guild_id,
             channel_id=self.channel_id,
-            post_weekday=self.selected_weekday,
+            post_weekday=self.post_weekday,
             post_hour=self.post_hour,
             post_minute=self.post_minute,
             post_timezone="UTC",
@@ -146,13 +133,13 @@ class RecurringDayRoleView(discord.ui.View):
         config_id = save_recurring(config)
         config.id = config_id
         active_recurring_configs[config_id] = config
-        day_abbr = WEEKDAY_ABBREVS[self.selected_weekday]
+        day_name = WEEKDAY_NAMES[self.post_weekday]
         log.info("recurring poll saved id=%d name=%s", config_id, self.event_name)
         role_note = f" Pings <@&{self.selected_role_id}>." if self.selected_role_id else ""
         await interaction.response.edit_message(
             content=(
-                f"✅ Recurring poll **{self.event_name}** saved! "
-                f"Will post every **{day_abbr}** at **{self.post_hour:02d}:{self.post_minute:02d} UTC** in this channel.{role_note}"
+                f"✅ **{self.event_name}** saved! Posts every **{day_name}** at "
+                f"**{self.post_hour:02d}:{self.post_minute:02d} UTC** in this channel.{role_note}"
             ),
             view=None,
         )
