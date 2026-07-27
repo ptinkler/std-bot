@@ -101,5 +101,5 @@ def build_poll_embed(poll: PollData, finalized_ts: int | None = None) -> discord
         description="\n".join(lines),
         color=discord.Color.blue(),
     )
-    embed.set_footer(text="Click dates to toggle availability • creator can Finalize to schedule")
+    embed.set_footer(text="Click dates to toggle availability • anyone can Finalize to schedule")
     return embed

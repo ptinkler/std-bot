@@ -482,9 +482,6 @@ class PollView(discord.ui.View):
         await interaction.message.delete()
 
     async def _finalize_cb(self, interaction: discord.Interaction):
-        if interaction.user.id != self.poll.creator_id:
-            await interaction.response.send_message("Only the poll creator can finalize.", ephemeral=True)
-            return
         view = FinalizeSelectView(self.poll, self.msg_id)
         lines = [
             f"**{i+1}.** {fmt_date(ts)} — {len(self.poll.votes.get(i, set()))} votes"
