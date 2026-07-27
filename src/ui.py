@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from bot_instance import bot
-from helpers import WEEKDAY_NAMES, build_closed_poll_embed, build_poll_embed, date_label, fmt_date, parse_time, parse_weekday, upcoming_days
+from helpers import WEEKDAY_NAMES, build_closed_poll_embed, build_poll_embed, date_label, fmt_date, parse_time, upcoming_days
 from models import TIMEZONES, PollData, RecurringPollConfig, active_polls, active_recurring_configs
 from persistence import delete_poll, delete_recurring, save_poll, save_recurring
 
@@ -35,6 +35,9 @@ class PollTypeView(discord.ui.View):
         await interaction.response.send_message("Manage recurring polls:", view=view, ephemeral=True)
 
 
+WEEKDAY_ABBREVS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
 class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"):
     event_name = discord.ui.TextInput(label="Poll Name", max_length=100, placeholder="e.g. Weekly Game Night")
     description = discord.ui.TextInput(
@@ -43,66 +46,57 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
         max_length=300,
         style=discord.TextStyle.paragraph,
     )
-    post_day = discord.ui.TextInput(
-        label="Post on which weekday?",
-        placeholder="e.g. Thursday",
-        max_length=20,
-    )
     post_time_input = discord.ui.TextInput(
-        label="Post at what time?",
+        label="Post at what time? (UTC)",
         placeholder="e.g. 18:00 or 6:00 PM",
         max_length=15,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        weekday = parse_weekday(str(self.post_day))
-        if weekday is None:
-            await interaction.response.send_message(
-                "Couldn't parse day. Use: Monday, Tuesday, ... or Mon, Tue, ...", ephemeral=True
-            )
-            return
         t = parse_time(str(self.post_time_input))
         if t is None:
             await interaction.response.send_message(
                 "Couldn't parse time. Use `18:00` or `6:00 PM`.", ephemeral=True
             )
             return
-        view = RecurringTimezoneView(
+        view = RecurringDayRoleView(
             event_name=str(self.event_name),
             description=str(self.description or ""),
             creator_id=interaction.user.id,
             guild_id=interaction.guild_id,
             channel_id=interaction.channel_id,
-            post_weekday=weekday,
             post_hour=t.hour,
             post_minute=t.minute,
         )
-        day_name = WEEKDAY_NAMES[weekday]
         await interaction.response.send_message(
-            f"**{self.event_name}** — posts every **{day_name}** at **{t.hour:02d}:{t.minute:02d}**.\nPick your timezone:",
+            f"**{self.event_name}** — posts at **{t.hour:02d}:{t.minute:02d} UTC**.\nPick the day and optional role ping:",
             view=view,
             ephemeral=True,
         )
 
 
-class RecurringTimezoneView(discord.ui.View):
-    def __init__(self, event_name, description, creator_id, guild_id, channel_id, post_weekday, post_hour, post_minute):
+class RecurringDayRoleView(discord.ui.View):
+    def __init__(self, event_name, description, creator_id, guild_id, channel_id, post_hour, post_minute):
         super().__init__(timeout=300)
         self.event_name = event_name
         self.description = description
         self.creator_id = creator_id
         self.guild_id = guild_id
         self.channel_id = channel_id
-        self.post_weekday = post_weekday
         self.post_hour = post_hour
         self.post_minute = post_minute
-        self.selected_tz: str | None = None
+        self.selected_weekday: int | None = None
         self.selected_role_id: int | None = None
 
-        tz_options = [discord.SelectOption(label=label, value=iana) for iana, label in TIMEZONES]
-        self.tz_select = discord.ui.Select(placeholder="Select timezone...", options=tz_options, row=0)
-        self.tz_select.callback = self._on_tz
-        self.add_item(self.tz_select)
+        weekday_options = [
+            discord.SelectOption(label=abbr, value=str(i))
+            for i, abbr in enumerate(WEEKDAY_ABBREVS)
+        ]
+        self.weekday_select = discord.ui.Select(
+            placeholder="Which day to post?", options=weekday_options, row=0
+        )
+        self.weekday_select.callback = self._on_weekday
+        self.add_item(self.weekday_select)
 
         self.role_select = discord.ui.RoleSelect(
             placeholder="Mention a role when posting? (optional)",
@@ -119,19 +113,18 @@ class RecurringTimezoneView(discord.ui.View):
         self.confirm_btn.callback = self._on_confirm
         self.add_item(self.confirm_btn)
 
-    def _summary(self, tz_label: str) -> str:
-        day_name = WEEKDAY_NAMES[self.post_weekday]
-        role_part = f" • pings <@&{self.selected_role_id}>" if self.selected_role_id else ""
-        return (
-            f"**{self.event_name}** — posts every **{day_name}** at "
-            f"**{self.post_hour:02d}:{self.post_minute:02d}** ({tz_label}){role_part}\nReady to save?"
-        )
-
-    async def _on_tz(self, interaction: discord.Interaction):
-        self.selected_tz = self.tz_select.values[0]
+    async def _on_weekday(self, interaction: discord.Interaction):
+        self.selected_weekday = int(self.weekday_select.values[0])
         self.confirm_btn.disabled = False
-        tz_label = next(label for iana, label in TIMEZONES if iana == self.selected_tz)
-        await interaction.response.edit_message(content=self._summary(tz_label), view=self)
+        day_abbr = WEEKDAY_ABBREVS[self.selected_weekday]
+        role_part = f" • pings <@&{self.selected_role_id}>" if self.selected_role_id else ""
+        await interaction.response.edit_message(
+            content=(
+                f"**{self.event_name}** — posts every **{day_abbr}** at "
+                f"**{self.post_hour:02d}:{self.post_minute:02d} UTC**{role_part}\nReady to save?"
+            ),
+            view=self,
+        )
 
     async def _on_role(self, interaction: discord.Interaction):
         self.selected_role_id = self.role_select.values[0].id if self.role_select.values else None
@@ -144,25 +137,27 @@ class RecurringTimezoneView(discord.ui.View):
             creator_id=self.creator_id,
             guild_id=self.guild_id,
             channel_id=self.channel_id,
-            post_weekday=self.post_weekday,
+            post_weekday=self.selected_weekday,
             post_hour=self.post_hour,
             post_minute=self.post_minute,
-            post_timezone=self.selected_tz,
+            post_timezone="UTC",
             mention_role_id=self.selected_role_id,
         )
         config_id = save_recurring(config)
         config.id = config_id
         active_recurring_configs[config_id] = config
-        day_name = WEEKDAY_NAMES[self.post_weekday]
+        day_abbr = WEEKDAY_ABBREVS[self.selected_weekday]
         log.info("recurring poll saved id=%d name=%s", config_id, self.event_name)
         role_note = f" Pings <@&{self.selected_role_id}>." if self.selected_role_id else ""
         await interaction.response.edit_message(
             content=(
                 f"✅ Recurring poll **{self.event_name}** saved! "
-                f"Will post every **{day_name}** at **{self.post_hour:02d}:{self.post_minute:02d}** in this channel.{role_note}"
+                f"Will post every **{day_abbr}** at **{self.post_hour:02d}:{self.post_minute:02d} UTC** in this channel.{role_note}"
             ),
             view=None,
         )
+
+
 
 
 class ManageRecurringView(discord.ui.View):
