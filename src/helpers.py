@@ -38,6 +38,8 @@ def parse_time(s: str) -> dtime | None:
         (r"^(\d{1,2}):(\d{2})\s*(AM|PM)$", True, True),
         (r"^(\d{1,2})\s*(AM|PM)$", False, True),
         (r"^(\d{1,2}):(\d{2})$", True, False),
+        (r"^(\d{2})(\d{2})$", True, False),
+        (r"^(\d{1,2})$", False, False),
     ]:
         m = re.match(pattern, s)
         if not m:

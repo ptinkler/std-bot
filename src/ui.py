@@ -56,7 +56,7 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
         t = parse_time(str(self.post_time_input))
         if t is None:
             await interaction.response.send_message(
-                "Couldn't parse time. Use `18:00` or `6:00 PM`.", ephemeral=True
+                "Couldn't parse time. Use `18:00`, `1800`, `18`, or `6:00 PM`.", ephemeral=True
             )
             return
         view = RecurringDayRoleView(
