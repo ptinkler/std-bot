@@ -12,7 +12,6 @@ from helpers import build_closed_poll_embed, build_poll_embed, next_week_dates
 from models import PollData, active_polls, active_recurring_configs
 from persistence import (
     delete_poll,
-    init_db,
     load_polls,
     load_recurring_polls,
     save_poll,
@@ -30,9 +29,47 @@ if TOKEN is None:
     raise ValueError("DISCORD_TOKEN environment variable not found")
 
 
-@bot.tree.command(name="std", description="Create an availability poll for an event")
+@bot.tree.command(name="std", description="Create a one-time or weekly recurring availability poll. Use /std-help for details.")
 async def std_command(interaction: discord.Interaction):
     await interaction.response.send_message("What type of poll?", view=PollTypeView(), ephemeral=True)
+
+
+@bot.tree.command(name="std-help", description="How to use the STD availability poll bot")
+async def std_help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📅 STD Bot — Help",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="/std → One-time Poll",
+        value=(
+            "Creates a poll with selectable dates from the next 25 days.\n"
+            "Members click dates to toggle availability.\n"
+            "Creator can **Finalize** to pick a date and schedule a Discord event, or **Cancel** to remove the poll."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="/std → Weekly Recurring Poll",
+        value=(
+            "Posts a new availability poll automatically every week.\n"
+            "You pick: poll name, which weekday to post, what time, and timezone.\n"
+            "Optionally ping a role when the poll goes out.\n"
+            "Each poll shows **Mon–Sun of the following week** for members to vote on.\n"
+            "The previous week's poll is automatically closed when the new one posts."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="/std → Manage Recurring Polls",
+        value=(
+            "Lists all recurring polls in this server.\n"
+            "Poll creator or server admins can cancel a recurring poll."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Votes are saved across bot restarts.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def _post_recurring_poll(config, iso_week: str):
@@ -100,7 +137,6 @@ async def check_recurring_polls():
 
 @bot.event
 async def on_ready():
-    init_db()
     for msg_id, poll in load_polls():
         active_polls[msg_id] = poll
         view = PollView(poll)
