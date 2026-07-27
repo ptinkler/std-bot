@@ -7,4 +7,6 @@ COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 ENV PYTHONPATH=/app/src
-CMD ["sh", "-c", ".venv/bin/alembic upgrade head && .venv/bin/python src/main.py"]
+COPY entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+CMD ["sh", "entrypoint.sh"]
