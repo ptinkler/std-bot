@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import discord
@@ -8,7 +8,13 @@ from discord.ext import tasks
 from dotenv import load_dotenv
 
 from bot_instance import bot
-from helpers import build_closed_poll_embed, build_poll_embed, next_week_dates
+from helpers import (
+    build_closed_poll_embed,
+    build_poll_embed,
+    next_post_datetime,
+    next_week_dates,
+    resolve_expected_ids,
+)
 from models import PollData, active_polls, active_recurring_configs
 from persistence import (
     delete_poll,
@@ -16,7 +22,10 @@ from persistence import (
     load_recurring_polls,
     save_poll,
     update_recurring_after_post,
+    update_recurring_reminded,
 )
+
+REMINDER_HOURS_BEFORE = 24  # ping expected non-responders this long before the next reset
 from ui import PollTypeView, PollView
 
 load_dotenv()
@@ -55,8 +64,20 @@ async def std_help_command(interaction: discord.Interaction):
             "Posts a new availability poll automatically every week.\n"
             "You pick: poll name, which weekday to post, what time, and timezone.\n"
             "Optionally ping a role when the poll goes out.\n"
+            "Optionally set **expected respondents** — a list of people and/or a whole role. "
+            "Anyone expected who hasn't responded ~24h before the poll resets gets an @ping "
+            "in the channel.\n"
             "Each poll shows **Mon–Sun of the following week** for members to vote on.\n"
             "The previous week's poll is automatically closed when the new one posts."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🚫 \"Can't make any\" option",
+        value=(
+            "Both poll types can offer a **Can't make any** button (toggle it on/off when creating).\n"
+            "Ticking it counts as responding, so expected respondents who genuinely can't "
+            "attend won't be reminded."
         ),
         inline=False,
     )
@@ -64,7 +85,8 @@ async def std_help_command(interaction: discord.Interaction):
         name="/std → Manage Recurring Polls",
         value=(
             "Lists all recurring polls in this server.\n"
-            "Poll creator or server admins can cancel a recurring poll."
+            "Poll creator or server admins can **edit** the name, day, time, mention role, "
+            "expected respondents, and the can't-make-any option, or **cancel** a recurring poll."
         ),
         inline=False,
     )
@@ -92,6 +114,7 @@ async def _post_recurring_poll(config, iso_week: str):
                 pass
 
     dates = next_week_dates()
+    expected = resolve_expected_ids(guild, config.expected_role_id, config.expected_respondent_ids)
     poll = PollData(
         event_name=config.event_name,
         description=config.description,
@@ -100,6 +123,8 @@ async def _post_recurring_poll(config, iso_week: str):
         channel_id=config.channel_id,
         dates=dates,
         votes={i: set() for i in range(len(dates))},
+        allow_cannot_attend=config.allow_cannot_attend,
+        expected_respondent_ids=expected,
     )
     view = PollView(poll)
     embed = build_poll_embed(poll)
@@ -114,6 +139,45 @@ async def _post_recurring_poll(config, iso_week: str):
     config.last_posted_week = iso_week
     config.last_poll_msg_id = msg.id
     log.info("recurring poll posted: %s week=%s msg=%d", config.event_name, iso_week, msg.id)
+
+
+async def _send_reminders(config, now_local):
+    """Ping expected respondents who haven't responded to the current open poll."""
+    if config.last_poll_msg_id is None:
+        return
+    if not config.expected_respondent_ids and config.expected_role_id is None:
+        return
+    poll = active_polls.get(config.last_poll_msg_id)
+    if poll is None:
+        return
+
+    next_post = next_post_datetime(config.post_weekday, config.post_hour, config.post_minute, now_local)
+    reminder_at = next_post - timedelta(hours=REMINDER_HOURS_BEFORE)
+    target_week = next_post.strftime("%G-W%V")
+    if now_local < reminder_at or config.last_reminded_week == target_week:
+        return
+
+    guild = bot.get_guild(config.guild_id)
+    # Resolve the expected set live so role membership is current at reminder time.
+    expected = resolve_expected_ids(guild, config.expected_role_id, config.expected_respondent_ids)
+    responded = poll.responded_users()
+    pending = [uid for uid in expected if uid not in responded]
+
+    # Mark done for this cycle even if nobody is pending, so we don't re-check all day.
+    config.last_reminded_week = target_week
+    update_recurring_reminded(config.id, target_week)
+    if not pending:
+        return
+
+    channel = guild.get_channel(config.channel_id) if guild else None
+    if channel is None:
+        return
+    mentions = " ".join(f"<@{uid}>" for uid in pending)
+    await channel.send(
+        f"⏰ Reminder for **{config.event_name}** — the poll resets <t:{int(next_post.timestamp())}:R>. "
+        f"Please respond (pick dates or 🚫 can't make any): {mentions}"
+    )
+    log.info("reminder sent config=%d pending=%d", config.id, len(pending))
 
 
 @tasks.loop(minutes=1)
@@ -131,6 +195,7 @@ async def check_recurring_polls():
                 and config.last_posted_week != iso_week
             ):
                 await _post_recurring_poll(config, iso_week)
+            await _send_reminders(config, now_local)
         except Exception:
             log.exception("error in recurring poll check id=%d", config_id)
 

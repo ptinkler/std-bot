@@ -15,6 +15,10 @@ class RecurringPollConfig:
     last_posted_week: str | None = None
     last_poll_msg_id: int | None = None
     mention_role_id: int | None = None
+    expected_respondent_ids: list[int] = field(default_factory=list)
+    expected_role_id: int | None = None
+    allow_cannot_attend: bool = True
+    last_reminded_week: str | None = None
     id: int | None = None
 
 
@@ -30,6 +34,16 @@ class PollData:
     channel_id: int
     dates: list[int]  # unix timestamps (midnight UTC per date)
     votes: dict[int, set[int]] = field(default_factory=dict)  # date_idx -> user_ids
+    cannot_attend: set[int] = field(default_factory=set)  # users who can't make any date
+    allow_cannot_attend: bool = True  # whether the "can't make any" option is offered
+    expected_respondent_ids: list[int] = field(default_factory=list)  # who is expected to respond
+
+    def responded_users(self) -> set[int]:
+        """Everyone who has given any response: a date vote or a can't-attend tick."""
+        users = set(self.cannot_attend)
+        for voters in self.votes.values():
+            users |= voters
+        return users
 
 
 active_polls: dict[int, PollData] = {}  # poll message_id -> PollData

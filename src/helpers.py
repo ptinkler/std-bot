@@ -18,6 +18,25 @@ def parse_weekday(s: str) -> int | None:
     return None
 
 
+def resolve_expected_ids(guild, expected_role_id: int | None, manual_ids: list[int]) -> list[int]:
+    """Expected respondents = manual list ∪ non-bot members of the expected role."""
+    ids = set(manual_ids)
+    if expected_role_id and guild is not None:
+        role = guild.get_role(expected_role_id)
+        if role is not None:
+            ids |= {m.id for m in role.members if not m.bot}
+    return sorted(ids)
+
+
+def next_post_datetime(weekday: int, hour: int, minute: int, now_local: datetime) -> datetime:
+    """Next occurrence of weekday at hour:minute strictly after now_local (same tz)."""
+    days_ahead = (weekday - now_local.weekday()) % 7
+    candidate = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=days_ahead)
+    if candidate <= now_local:
+        candidate += timedelta(days=7)
+    return candidate
+
+
 def next_week_dates() -> list[int]:
     """Mon–Sun of next ISO week as midnight UTC timestamps."""
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -96,10 +115,28 @@ def build_poll_embed(poll: PollData, finalized_ts: int | None = None) -> discord
             mentions = "*no votes yet*"
         lines.append(f"{fmt_date(ts)} — **{count}** {'person' if count == 1 else 'people'}\n{mentions}")
 
+    if poll.cannot_attend:
+        count = len(poll.cannot_attend)
+        ca_list = list(poll.cannot_attend)
+        shown = " ".join(f"<@{uid}>" for uid in ca_list[:6])
+        mentions = shown + (f" *+{count - 6} more…*" if count > 6 else "")
+        lines.append(f"🚫 **Can't make any** — **{count}** {'person' if count == 1 else 'people'}\n{mentions}")
+
+    if poll.expected_respondent_ids:
+        responded = poll.responded_users()
+        pending = [uid for uid in poll.expected_respondent_ids if uid not in responded]
+        if pending:
+            lines.append("\n⏳ **Waiting on:** " + " ".join(f"<@{uid}>" for uid in pending))
+        else:
+            lines.append("\n✅ **Everyone expected has responded.**")
+
     embed = discord.Embed(
         title=f"📅 {poll.event_name} — When can you attend?",
         description="\n".join(lines),
         color=discord.Color.blue(),
     )
-    embed.set_footer(text="Click dates to toggle availability • anyone can Finalize to schedule")
+    footer = "Click dates to toggle availability • anyone can Finalize to schedule"
+    if poll.allow_cannot_attend:
+        footer = "Click dates, or 🚫 if you can't make any • anyone can Finalize to schedule"
+    embed.set_footer(text=footer)
     return embed

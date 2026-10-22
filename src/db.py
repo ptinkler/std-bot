@@ -36,3 +36,7 @@ class RecurringPollRow(Base):
     last_posted_week = Column(String, nullable=True)
     last_poll_msg_id = Column(Integer, nullable=True)
     mention_role_id = Column(Integer, nullable=True)
+    expected_respondents = Column(String, nullable=True)  # JSON list of user ids
+    expected_role_id = Column(Integer, nullable=True)  # everyone in this role is expected
+    allow_cannot_attend = Column(Integer, nullable=False, default=1)
+    last_reminded_week = Column(String, nullable=True)
