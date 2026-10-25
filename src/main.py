@@ -25,7 +25,6 @@ from persistence import (
     update_recurring_reminded,
 )
 
-REMINDER_HOURS_BEFORE = 24  # ping expected non-responders this long before the next reset
 from ui import PollTypeView, PollView
 
 load_dotenv()
@@ -152,7 +151,7 @@ async def _send_reminders(config, now_local):
         return
 
     next_post = next_post_datetime(config.post_weekday, config.post_hour, config.post_minute, now_local)
-    reminder_at = next_post - timedelta(hours=REMINDER_HOURS_BEFORE)
+    reminder_at = next_post - timedelta(days=config.reminder_days_before or 1)
     target_week = next_post.strftime("%G-W%V")
     if now_local < reminder_at or config.last_reminded_week == target_week:
         return

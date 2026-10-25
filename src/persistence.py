@@ -59,6 +59,7 @@ def save_recurring(config: RecurringPollConfig) -> int:
             expected_respondents=json.dumps(config.expected_respondent_ids),
             expected_role_id=config.expected_role_id,
             allow_cannot_attend=1 if config.allow_cannot_attend else 0,
+            reminder_days_before=config.reminder_days_before,
             last_reminded_week=config.last_reminded_week,
         )
         session.add(row)
@@ -88,6 +89,7 @@ def update_recurring(config: RecurringPollConfig):
             row.expected_respondents = json.dumps(config.expected_respondent_ids)
             row.expected_role_id = config.expected_role_id
             row.allow_cannot_attend = 1 if config.allow_cannot_attend else 0
+            row.reminder_days_before = config.reminder_days_before
             session.commit()
 
 
@@ -129,6 +131,7 @@ def load_recurring_polls() -> list[RecurringPollConfig]:
                 expected_respondent_ids=json.loads(row.expected_respondents) if row.expected_respondents else [],
                 expected_role_id=row.expected_role_id,
                 allow_cannot_attend=bool(row.allow_cannot_attend),
+                reminder_days_before=row.reminder_days_before or 1,
                 last_reminded_week=row.last_reminded_week,
             )
             for row in rows

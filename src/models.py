@@ -18,6 +18,7 @@ class RecurringPollConfig:
     expected_respondent_ids: list[int] = field(default_factory=list)
     expected_role_id: int | None = None
     allow_cannot_attend: bool = True
+    reminder_days_before: int = 1  # ping non-responders this many days before each reset
     last_reminded_week: str | None = None
     id: int | None = None
 

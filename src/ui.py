@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from bot_instance import bot
-from helpers import WEEKDAY_NAMES, build_closed_poll_embed, build_poll_embed, date_label, fmt_date, parse_time, parse_weekday, resolve_expected_ids, upcoming_days
+from helpers import POLL_OPEN_DAYS, WEEKDAY_NAMES, build_closed_poll_embed, build_poll_embed, date_label, fmt_date, parse_reminder_days, parse_time, parse_weekday, resolve_expected_ids, upcoming_days
 from models import TIMEZONES, PollData, RecurringPollConfig, active_polls, active_recurring_configs
 from persistence import delete_poll, delete_recurring, save_poll, save_recurring, update_recurring
 
@@ -53,6 +53,12 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
         placeholder="e.g. 18:00, 1800, or 6:00 PM",
         max_length=15,
     )
+    reminder_days_input = discord.ui.TextInput(
+        label="Remind how many days before reset?",
+        placeholder=f"1–{POLL_OPEN_DAYS - 1} (whole days)",
+        default="1",
+        max_length=2,
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         weekday = parse_weekday(str(self.post_day))
@@ -67,6 +73,14 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
                 "Couldn't parse time. Use e.g. `18:00`, `1800`, or `6:00 PM`.", ephemeral=True
             )
             return
+        reminder_days = parse_reminder_days(str(self.reminder_days_input))
+        if reminder_days is None:
+            await interaction.response.send_message(
+                f"Reminder lead time must be a whole number of days from 1 to {POLL_OPEN_DAYS - 1} "
+                f"(the poll is open for {POLL_OPEN_DAYS} days). No changes saved.",
+                ephemeral=True,
+            )
+            return
         view = RecurringRoleConfirmView(
             event_name=str(self.event_name),
             description=str(self.description or ""),
@@ -76,6 +90,7 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
             post_weekday=weekday,
             post_hour=t.hour,
             post_minute=t.minute,
+            reminder_days_before=reminder_days,
         )
         day_name = WEEKDAY_NAMES[weekday]
         await interaction.response.send_message(
@@ -86,7 +101,7 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
 
 
 class RecurringRoleConfirmView(discord.ui.View):
-    def __init__(self, event_name, description, creator_id, guild_id, channel_id, post_weekday, post_hour, post_minute):
+    def __init__(self, event_name, description, creator_id, guild_id, channel_id, post_weekday, post_hour, post_minute, reminder_days_before=1):
         super().__init__(timeout=300)
         self.event_name = event_name
         self.description = description
@@ -96,6 +111,7 @@ class RecurringRoleConfirmView(discord.ui.View):
         self.post_weekday = post_weekday
         self.post_hour = post_hour
         self.post_minute = post_minute
+        self.reminder_days_before = reminder_days_before
         self.selected_role_id: int | None = None
         self.expected_ids: list[int] = []
         self.expected_role_id: int | None = None
@@ -174,6 +190,7 @@ class RecurringRoleConfirmView(discord.ui.View):
             expected_respondent_ids=self.expected_ids,
             expected_role_id=self.expected_role_id,
             allow_cannot_attend=self.allow_cannot_attend,
+            reminder_days_before=self.reminder_days_before,
         )
         config_id = save_recurring(config)
         config.id = config_id
@@ -187,7 +204,9 @@ class RecurringRoleConfirmView(discord.ui.View):
                 who.append(f"{len(self.expected_ids)} listed member(s)")
             if self.expected_role_id:
                 who.append(f"everyone in <@&{self.expected_role_id}>")
-            expected_note = f"\n⏳ Will remind {' and '.join(who)} who haven't responded ~24h before each reset."
+            lead = self.reminder_days_before
+            lead_str = "1 day" if lead == 1 else f"{lead} days"
+            expected_note = f"\n⏳ Will remind {' and '.join(who)} who haven't responded {lead_str} before each reset."
         else:
             expected_note = ""
         await interaction.response.edit_message(
@@ -299,10 +318,17 @@ class RecurringScheduleEditModal(discord.ui.Modal, title="Edit Name & Schedule")
             max_length=15,
             default=f"{config.post_hour:02d}:{config.post_minute:02d}",
         )
+        self.reminder_days_input = discord.ui.TextInput(
+            label="Remind how many days before reset?",
+            placeholder=f"1–{POLL_OPEN_DAYS - 1} (whole days)",
+            max_length=2,
+            default=str(config.reminder_days_before),
+        )
         self.add_item(self.name_input)
         self.add_item(self.desc_input)
         self.add_item(self.day_input)
         self.add_item(self.time_input)
+        self.add_item(self.reminder_days_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         weekday = parse_weekday(str(self.day_input))
@@ -317,17 +343,28 @@ class RecurringScheduleEditModal(discord.ui.Modal, title="Edit Name & Schedule")
                 "Couldn't parse time. Use e.g. `18:00`, `1800`, or `6:00 PM`. No changes saved.", ephemeral=True
             )
             return
+        reminder_days = parse_reminder_days(str(self.reminder_days_input))
+        if reminder_days is None:
+            await interaction.response.send_message(
+                f"Reminder lead time must be a whole number of days from 1 to {POLL_OPEN_DAYS - 1} "
+                f"(the poll is open for {POLL_OPEN_DAYS} days). No changes saved.",
+                ephemeral=True,
+            )
+            return
         self.config.event_name = str(self.name_input)
         self.config.description = str(self.desc_input or "")
         self.config.post_weekday = weekday
         self.config.post_hour = t.hour
         self.config.post_minute = t.minute
+        self.config.reminder_days_before = reminder_days
         update_recurring(self.config)
         log.info("recurring poll schedule edited id=%s", self.config.id)
         day_name = WEEKDAY_NAMES[weekday]
+        lead_str = "1 day" if reminder_days == 1 else f"{reminder_days} days"
         await interaction.response.send_message(
             f"✅ **{self.config.event_name}** now posts every **{day_name}** at "
-            f"**{t.hour:02d}:{t.minute:02d} UTC**. (Takes effect from the next weekly cycle.)",
+            f"**{t.hour:02d}:{t.minute:02d} UTC**, reminding non-responders {lead_str} before each reset. "
+            f"(Takes effect from the next weekly cycle.)",
             ephemeral=True,
         )
 

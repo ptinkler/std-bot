@@ -8,6 +8,23 @@ from models import PollData
 
 WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
+POLL_OPEN_DAYS = 7  # weekly recurring polls stay open for exactly one week between resets
+
+
+def parse_reminder_days(raw: str) -> int | None:
+    """Days before the reset to ping non-responders: a whole number, 1 .. POLL_OPEN_DAYS-1.
+
+    0 is pointless (the poll is resetting right then) and anything >= the open
+    period would land before the poll was even posted. Returns None if invalid.
+    """
+    try:
+        days = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    if 1 <= days < POLL_OPEN_DAYS:
+        return days
+    return None
+
 
 def parse_weekday(s: str) -> int | None:
     s = s.strip().lower()
