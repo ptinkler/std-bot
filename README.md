@@ -20,6 +20,20 @@ Logs:
 docker compose logs -f
 ```
 
+## Deploy under a stack manager
+
+`deploy/compose.yaml` is a variant for tools that manage compose stacks and inject variables as the stack's environment (Komodo, Portainer, etc.). It pulls the published image `ghcr.io/ptinkler/std-bot` rather than building locally. The bot only connects out to Discord, so no port or reverse proxy is needed.
+
+| Variable | Required | Default |
+|---|---|---|
+| `DISCORD_TOKEN` | Yes | — |
+| `STD_BOT_UID` | Yes | — |
+| `STD_BOT_GID` | Yes | — |
+| `STD_BOT_DATA_DIR` | Yes | — |
+| `STD_BOT_VERSION` | No | `latest` |
+
+`STD_BOT_DATA_DIR` is the host folder that holds `polls.db`. It must be owned by `STD_BOT_UID:STD_BOT_GID` and should be on local disk, not a network share.
+
 ## Environment variables
 
 | Variable | Required | Default |
