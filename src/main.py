@@ -7,6 +7,7 @@ import discord
 from discord.ext import tasks
 from dotenv import load_dotenv
 
+from backup import start_backups
 from bot_instance import bot
 from helpers import (
     build_closed_poll_embed,
@@ -211,6 +212,7 @@ async def on_ready():
         active_recurring_configs[config.id] = config
     log.info("restored %d recurring poll config(s)", len(active_recurring_configs))
     check_recurring_polls.start()
+    start_backups()
     await bot.tree.sync()
     log.info("connected: %s", bot.user)
 

@@ -40,12 +40,17 @@ docker compose logs -f
 |---|---|---|
 | `DISCORD_TOKEN` | Yes | — |
 | `DB_PATH` | No | `/data/polls.db` |
+| `BACKUP_INTERVAL_HOURS` | No | `24` (`0` = off) |
+| `BACKUP_KEEP` | No | `7` |
+| `BACKUP_DIR` | No | `backups/` beside the database |
 | `UID` | No | `1000` |
 | `GID` | No | `1000` |
 
 ## Data persistence
 
 Polls are stored in a SQLite database. The `./data` directory is mounted to `/data` in the container — without this mount, all polls are lost on restart.
+
+The bot also copies its database by itself: every `BACKUP_INTERVAL_HOURS` a consistent snapshot goes to `backups/` beside the database (`polls-<timestamp>.db`), and all but the newest `BACKUP_KEEP` are deleted. The copy is made with SQLite's `VACUUM INTO`, so it is safe while the bot is running. That guards against a bad migration or a deleted row, not a dead disk, so still copy the data directory elsewhere. To restore: stop the bot, copy a snapshot over `polls.db`, start it.
 
 ## Local development
 
