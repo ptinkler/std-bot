@@ -1,0 +1,28 @@
+# Std bot as a single container, meant to be run by a stack manager (Komodo) that supplies the variables below as
+# the stack's environment (it writes them to a .env next to this file). The root docker-compose.yml is the plain
+# "run it anywhere" file.
+#
+# The bot only connects OUT (to Discord): no port is published and no reverse proxy is needed. Its SQLite database
+# lives in STD_BOT_DATA_DIR, which should be on local disk, not a network share.
+#
+# Variables:
+#   DISCORD_TOKEN       the bot's Discord token (a secret)
+#   STD_BOT_UID/GID     user the bot runs as; must own STD_BOT_DATA_DIR
+#   STD_BOT_DATA_DIR    host folder holding polls.db
+#   STD_BOT_VERSION     image tag (default latest)
+
+services:
+  std-bot:
+    image: ghcr.io/ptinkler/std-bot:${STD_BOT_VERSION:-latest}
+    container_name: std-bot
+    user: "${STD_BOT_UID:?set STD_BOT_UID}:${STD_BOT_GID:?set STD_BOT_GID}"
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
+      DB_PATH: /data/polls.db
+    volumes:
+      - ${STD_BOT_DATA_DIR:?set STD_BOT_DATA_DIR}:/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
