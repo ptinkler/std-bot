@@ -61,3 +61,12 @@ cp .env.example .env
 # edit .env
 .venv/bin/python main.py
 ```
+
+## Tests
+
+```bash
+uv sync                  # includes the dev group (pytest)
+.venv/bin/pytest
+```
+
+CI runs the same suite inside the built Docker image on every pull request, so base-image and dependency bumps are tested against what production runs.
