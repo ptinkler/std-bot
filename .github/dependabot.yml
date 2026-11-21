@@ -1,24 +1,33 @@
-# Weekly pull requests for out-of-date dependencies, so security fixes arrive without anyone having to look.
-# Minor and patch updates are grouped into one pull request per ecosystem; a major version is its own.
+# Dependabot policy:
+#  - Application dependencies (uv, npm): security updates only. `open-pull-requests-limit: 0` turns off routine
+#    version updates for that ecosystem; security update PRs are separate and not affected.
+#  - Docker images and GitHub Actions: weekly version updates, because GitHub's advisory database does not cover
+#    container images, so version updates are the only protection for them.
+#  - Every version update waits 14 days after a release (`cooldown`), so a freshly published (possibly compromised)
+#    version is not proposed straight away. Security updates ignore the cooldown.
 version: 2
 updates:
   - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
-    groups:
-      python-minor-and-patch:
-        update-types: [minor, patch]
+    open-pull-requests-limit: 0
+    cooldown:
+      default-days: 14
 
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     groups:
       actions:
         patterns: ["*"]
