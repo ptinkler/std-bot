@@ -1,0 +1,21 @@
+# Dependabot PRs merge themselves once the required check passes, majors included.
+# Needs "Allow auto-merge" in the repo settings and the check as a required status check on main:
+# without a required check, GitHub merges at once instead of waiting for CI.
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
