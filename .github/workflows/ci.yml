@@ -1,5 +1,6 @@
-# Checks every pull request (including Dependabot's) before it can be merged:
-# the image builds from the locked dependencies, the code compiles, the modules import and the migrations run.
+# Checks every pull request (including Dependabot's) before it can be merged.
+# The tests run inside the image that gets deployed, so a bump of the Python base image or of a locked
+# dependency is tested against exactly what production runs.
 name: CI
 
 on:
@@ -9,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  build-and-smoke-test:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,11 +18,7 @@ jobs:
       - name: Build image
         run: docker build -t std-bot:ci .
 
-      - name: Compile and import
+      - name: Run the tests in the image
         run: |
-          docker run --rm --entrypoint .venv/bin/python std-bot:ci -m compileall -q src
-          docker run --rm -e DB_PATH=/tmp/ci.db --entrypoint .venv/bin/python std-bot:ci \
-            -c "import db, models, persistence, helpers, ui"
-
-      - name: Run migrations on an empty database
-        run: docker run --rm -e DB_PATH=/tmp/ci.db --entrypoint .venv/bin/alembic std-bot:ci upgrade head
+          docker run --rm -v "$PWD/tests:/app/tests:ro" --entrypoint sh std-bot:ci \
+            -c "uv sync --frozen --quiet && .venv/bin/pytest -q -p no:cacheprovider"
