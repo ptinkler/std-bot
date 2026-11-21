@@ -1,0 +1,27 @@
+# Checks every pull request (including Dependabot's) before it can be merged:
+# the image builds from the locked dependencies, the code compiles, the modules import and the migrations run.
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t std-bot:ci .
+
+      - name: Compile and import
+        run: |
+          docker run --rm --entrypoint .venv/bin/python std-bot:ci -m compileall -q src
+          docker run --rm -e DB_PATH=/tmp/ci.db --entrypoint .venv/bin/python std-bot:ci \
+            -c "import db, models, persistence, helpers, ui"
+
+      - name: Run migrations on an empty database
+        run: docker run --rm -e DB_PATH=/tmp/ci.db --entrypoint .venv/bin/alembic std-bot:ci upgrade head
