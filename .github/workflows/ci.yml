@@ -10,7 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  # The job keeps its original name because the main ruleset requires the check `build-and-smoke-test`.
+  build-and-smoke-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
