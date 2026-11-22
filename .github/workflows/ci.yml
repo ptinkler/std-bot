@@ -1,0 +1,25 @@
+# Checks every pull request (including Dependabot's) before it can be merged.
+# The tests run inside the image that gets deployed, so a bump of the Python base image or of a locked
+# dependency is tested against exactly what production runs.
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The job keeps its original name because the main ruleset requires the check `build-and-smoke-test`.
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t std-bot:ci .
+
+      - name: Run the tests in the image
+        run: |
+          docker run --rm -v "$PWD/tests:/app/tests:ro" --entrypoint sh std-bot:ci \
+            -c "uv sync --frozen --quiet && .venv/bin/pytest -q -p no:cacheprovider"
