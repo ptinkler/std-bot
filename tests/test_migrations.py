@@ -13,7 +13,7 @@ def _alembic(db_path, *args):
     import os
 
     env = {**os.environ, "DB_PATH": str(db_path)}
-    return subprocess.run(
+    return subprocess.run(  # noqa: S603 - fixed argv, no untrusted input
         [sys.executable, "-m", "alembic", *args], cwd=ROOT, env=env, capture_output=True, text=True, check=False
     )
 

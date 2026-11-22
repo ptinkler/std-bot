@@ -1,5 +1,6 @@
-from models import TIMEZONES, PollData
 from zoneinfo import ZoneInfo
+
+from models import TIMEZONES, PollData
 
 
 def test_responded_users_unions_votes_and_cannot_attend():

@@ -1,3 +1,4 @@
+import itertools
 from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -78,7 +79,9 @@ def test_next_post_datetime_keeps_the_timezone():
 
 
 def test_resolve_expected_ids_merges_manual_and_role_members_without_bots():
-    role = SimpleNamespace(members=[SimpleNamespace(id=5, bot=False), SimpleNamespace(id=6, bot=True), SimpleNamespace(id=2, bot=False)])
+    role = SimpleNamespace(
+        members=[SimpleNamespace(id=5, bot=False), SimpleNamespace(id=6, bot=True), SimpleNamespace(id=2, bot=False)]
+    )
     guild = SimpleNamespace(get_role=lambda rid: role if rid == 99 else None)
     assert resolve_expected_ids(guild, 99, [2, 1]) == [1, 2, 5]
     assert resolve_expected_ids(guild, 404, [3]) == [3]  # role no longer exists
@@ -89,7 +92,7 @@ def test_resolve_expected_ids_merges_manual_and_role_members_without_bots():
 def test_next_week_dates_are_next_monday_to_sunday_midnight_utc():
     dates = next_week_dates()
     assert len(dates) == 7
-    assert all(b - a == DAY for a, b in zip(dates, dates[1:], strict=False))
+    assert all(b - a == DAY for a, b in itertools.pairwise(dates))
     first = datetime.fromtimestamp(dates[0], tz=timezone.utc)
     assert (first.weekday(), first.hour, first.minute, first.second) == (0, 0, 0, 0)
     assert dates[0] > datetime.now(timezone.utc).timestamp()

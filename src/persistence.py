@@ -11,19 +11,21 @@ def init_db():
 
 
 def save_poll(msg_id: int, poll: PollData):
-    data = json.dumps({
-        "msg_id": msg_id,
-        "event_name": poll.event_name,
-        "description": poll.description,
-        "creator_id": poll.creator_id,
-        "guild_id": poll.guild_id,
-        "channel_id": poll.channel_id,
-        "dates": poll.dates,
-        "votes": {str(k): list(v) for k, v in poll.votes.items()},
-        "cannot_attend": list(poll.cannot_attend),
-        "allow_cannot_attend": poll.allow_cannot_attend,
-        "expected_respondent_ids": poll.expected_respondent_ids,
-    })
+    data = json.dumps(
+        {
+            "msg_id": msg_id,
+            "event_name": poll.event_name,
+            "description": poll.description,
+            "creator_id": poll.creator_id,
+            "guild_id": poll.guild_id,
+            "channel_id": poll.channel_id,
+            "dates": poll.dates,
+            "votes": {str(k): list(v) for k, v in poll.votes.items()},
+            "cannot_attend": list(poll.cannot_attend),
+            "allow_cannot_attend": poll.allow_cannot_attend,
+            "expected_respondent_ids": poll.expected_respondent_ids,
+        }
+    )
     with Session(engine) as session:
         row = session.get(PollRow, msg_id)
         if row:

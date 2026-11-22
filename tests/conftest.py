@@ -5,10 +5,10 @@ import tempfile
 os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(prefix="std-bot-tests-"), "polls.db")
 os.environ.setdefault("DISCORD_TOKEN", "test-token")
 
-import pytest  # noqa: E402
+import pytest
 
-from db import Base, engine  # noqa: E402
-from models import active_polls, active_recurring_configs  # noqa: E402
+from db import Base, engine
+from models import active_polls, active_recurring_configs
 
 
 @pytest.fixture(autouse=True)
@@ -18,4 +18,3 @@ def clean_state():
     Base.metadata.create_all(engine)
     active_polls.clear()
     active_recurring_configs.clear()
-    yield
