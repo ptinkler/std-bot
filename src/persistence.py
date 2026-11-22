@@ -1,5 +1,6 @@
 import json
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db import Base, PollRow, RecurringPollRow, engine
@@ -43,27 +44,55 @@ def delete_poll(msg_id: int):
             session.commit()
 
 
+def _write_editable_fields(row: RecurringPollRow, config: RecurringPollConfig) -> None:
+    """Copy the user-editable fields of a config onto its row (shared by create and update)."""
+    row.event_name = config.event_name
+    row.description = config.description
+    row.post_weekday = config.post_weekday
+    row.post_hour = config.post_hour
+    row.post_minute = config.post_minute
+    row.mention_role_id = config.mention_role_id
+    row.expected_respondents = json.dumps(config.expected_respondent_ids)
+    row.expected_role_id = config.expected_role_id
+    row.allow_cannot_attend = 1 if config.allow_cannot_attend else 0
+    row.reminder_days_before = config.reminder_days_before
+
+
+def _config_from_row(row: RecurringPollRow) -> RecurringPollConfig:
+    return RecurringPollConfig(
+        id=row.id,
+        event_name=row.event_name,
+        description=row.description,
+        creator_id=row.creator_id,
+        guild_id=row.guild_id,
+        channel_id=row.channel_id,
+        post_weekday=row.post_weekday,
+        post_hour=row.post_hour,
+        post_minute=row.post_minute,
+        post_timezone=row.post_timezone,
+        last_posted_week=row.last_posted_week,
+        last_poll_msg_id=row.last_poll_msg_id,
+        mention_role_id=row.mention_role_id,
+        expected_respondent_ids=json.loads(row.expected_respondents) if row.expected_respondents else [],
+        expected_role_id=row.expected_role_id,
+        allow_cannot_attend=bool(row.allow_cannot_attend),
+        reminder_days_before=row.reminder_days_before or 1,
+        last_reminded_week=row.last_reminded_week,
+    )
+
+
 def save_recurring(config: RecurringPollConfig) -> int:
     with Session(engine) as session:
         row = RecurringPollRow(
-            event_name=config.event_name,
-            description=config.description,
             creator_id=config.creator_id,
             guild_id=config.guild_id,
             channel_id=config.channel_id,
-            post_weekday=config.post_weekday,
-            post_hour=config.post_hour,
-            post_minute=config.post_minute,
             post_timezone=config.post_timezone,
             last_posted_week=config.last_posted_week,
             last_poll_msg_id=config.last_poll_msg_id,
-            mention_role_id=config.mention_role_id,
-            expected_respondents=json.dumps(config.expected_respondent_ids),
-            expected_role_id=config.expected_role_id,
-            allow_cannot_attend=1 if config.allow_cannot_attend else 0,
-            reminder_days_before=config.reminder_days_before,
             last_reminded_week=config.last_reminded_week,
         )
+        _write_editable_fields(row, config)
         session.add(row)
         session.commit()
         return row.id
@@ -82,16 +111,7 @@ def update_recurring(config: RecurringPollConfig):
     with Session(engine) as session:
         row = session.get(RecurringPollRow, config.id)
         if row:
-            row.event_name = config.event_name
-            row.description = config.description
-            row.post_weekday = config.post_weekday
-            row.post_hour = config.post_hour
-            row.post_minute = config.post_minute
-            row.mention_role_id = config.mention_role_id
-            row.expected_respondents = json.dumps(config.expected_respondent_ids)
-            row.expected_role_id = config.expected_role_id
-            row.allow_cannot_attend = 1 if config.allow_cannot_attend else 0
-            row.reminder_days_before = config.reminder_days_before
+            _write_editable_fields(row, config)
             session.commit()
 
 
@@ -114,35 +134,12 @@ def update_recurring_reminded(config_id: int, week_str: str):
 
 def load_recurring_polls() -> list[RecurringPollConfig]:
     with Session(engine) as session:
-        rows = session.query(RecurringPollRow).all()
-        return [
-            RecurringPollConfig(
-                id=row.id,
-                event_name=row.event_name,
-                description=row.description,
-                creator_id=row.creator_id,
-                guild_id=row.guild_id,
-                channel_id=row.channel_id,
-                post_weekday=row.post_weekday,
-                post_hour=row.post_hour,
-                post_minute=row.post_minute,
-                post_timezone=row.post_timezone,
-                last_posted_week=row.last_posted_week,
-                last_poll_msg_id=row.last_poll_msg_id,
-                mention_role_id=row.mention_role_id,
-                expected_respondent_ids=json.loads(row.expected_respondents) if row.expected_respondents else [],
-                expected_role_id=row.expected_role_id,
-                allow_cannot_attend=bool(row.allow_cannot_attend),
-                reminder_days_before=row.reminder_days_before or 1,
-                last_reminded_week=row.last_reminded_week,
-            )
-            for row in rows
-        ]
+        return [_config_from_row(row) for row in session.scalars(select(RecurringPollRow))]
 
 
 def load_polls() -> list[tuple[int, PollData]]:
     with Session(engine) as session:
-        rows = session.query(PollRow).all()
+        rows = session.scalars(select(PollRow)).all()
     result = []
     for row in rows:
         d = json.loads(row.data)

@@ -735,10 +735,6 @@ class TimezoneSelectView(discord.ui.View):
         sel.callback = self._on_select
         self.add_item(sel)
 
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
-
     async def _on_select(self, interaction: discord.Interaction):
         tz = ZoneInfo(self.children[0].values[0])
         base_dt = datetime.fromtimestamp(self.poll.dates[self.date_idx], tz=timezone.utc)
@@ -888,10 +884,6 @@ class FinalizeSelectView(discord.ui.View):
         sel = discord.ui.Select(placeholder="Choose date...", options=options)
         sel.callback = self._on_select
         self.add_item(sel)
-
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
 
     async def _on_select(self, interaction: discord.Interaction):
         idx = int(self.children[0].values[0])
