@@ -20,4 +20,4 @@ EOF
 fi
 
 .venv/bin/alembic upgrade head
-exec .venv/bin/python src/main.py
+exec .venv/bin/python -m std_bot

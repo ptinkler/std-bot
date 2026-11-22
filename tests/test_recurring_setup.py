@@ -1,80 +1,96 @@
-"""The recurring-poll setup modal, its confirm view and the schedule parsing both modals share."""
+"""The recurring-poll setup modal, its confirm view and the schedule form shared with editing."""
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from typing import Any
 
-from models import RecurringPollConfig, active_recurring_configs
-from persistence import load_recurring_polls
-from ui import RecurringRoleConfirmView, RecurringSetupModal, _parse_schedule
+import discord
+import pytest
+
+from std_bot.bot import StdBot
+from std_bot.storage.recurring import load_recurring
+from std_bot.ui.recurring.confirm import RecurringConfirmView
+from std_bot.ui.recurring.schedule_form import (
+    DAY_ERROR,
+    REMINDER_ERROR,
+    TIME_ERROR,
+    Schedule,
+    ScheduleModal,
+    check_schedule,
+)
+from std_bot.ui.recurring.setup import RecurringSetupModal
+from tests.factories import make_draft, make_interaction
 
 
-def _interaction():
-    return SimpleNamespace(
-        user=SimpleNamespace(id=1),
-        guild_id=2,
-        channel_id=3,
-        response=SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
-    )
+def _typed(monkeypatch: pytest.MonkeyPatch, modal: ScheduleModal, **values: str) -> None:
+    """Make the modal's text inputs answer with the given text, as after a real submission."""
+    answers = {
+        id(modal.name_input): values.get("name", ""),
+        id(modal.description_input): "",
+        id(modal.day_input): values["day"],
+        id(modal.time_input): values["time"],
+        id(modal.reminder_input): values["reminder"],
+    }
+    monkeypatch.setattr(discord.ui.TextInput, "value", property(lambda item: answers[id(item)]))
 
 
-async def test_parse_schedule_accepts_good_input():
-    interaction = _interaction()
-    schedule = await _parse_schedule(interaction, "Thu", "6:30 PM", "2")
+def test_check_schedule_accepts_good_input() -> None:
+    """Day, time and reminder are parsed into a schedule."""
+    schedule = check_schedule("Thu", "6:30 PM", "2")
+    assert isinstance(schedule, Schedule)
     assert (schedule.weekday, schedule.time.hour, schedule.time.minute, schedule.reminder_days) == (3, 18, 30, 2)
-    interaction.response.send_message.assert_not_awaited()
 
 
-async def test_parse_schedule_names_the_bad_field_and_stops():
-    for args, expected in [
-        (("someday", "18:00", "1"), "Couldn't parse day"),
-        (("Thu", "late", "1"), "Couldn't parse time"),
-        (("Thu", "18:00", "9"), "Reminder lead time"),
-    ]:
-        interaction = _interaction()
-        assert await _parse_schedule(interaction, *args) is None
-        interaction.response.send_message.assert_awaited_once()
-        assert expected in interaction.response.send_message.await_args.args[0]
-        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+@pytest.mark.parametrize(
+    ("day", "time_text", "reminder", "expected"),
+    [
+        ("someday", "18:00", "1", DAY_ERROR),
+        ("Thu", "late", "1", TIME_ERROR),
+        ("Thu", "18:00", "9", REMINDER_ERROR),
+    ],
+)
+def test_check_schedule_reports_the_first_bad_field(day: str, time_text: str, reminder: str, expected: str) -> None:
+    """The message names the field that failed."""
+    assert check_schedule(day, time_text, reminder) == expected
 
 
-async def test_parse_schedule_appends_the_suffix_to_day_and_time_errors():
-    interaction = _interaction()
-    await _parse_schedule(interaction, "nope", "18:00", "1", suffix=" No changes saved.")
-    assert interaction.response.send_message.await_args.args[0].endswith("No changes saved.")
+async def test_bad_input_is_reported_privately_with_the_suffix(bot: StdBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The user gets an ephemeral message and nothing else happens."""
+    modal = RecurringSetupModal(bot)
+    _typed(monkeypatch, modal, day="someday", time="18:00", reminder="1")
+    interaction = make_interaction()
+    assert await modal.read_schedule(interaction, error_suffix=" No changes saved.") is None
+    interaction.response.send_message.assert_awaited_once_with(DAY_ERROR + " No changes saved.", ephemeral=True)
 
 
-async def test_setup_modal_hands_a_draft_to_the_confirm_view():
-    modal = RecurringSetupModal()
-    modal.event_name._value = "Game night"
-    modal.post_day._value = "Friday"
-    modal.post_time_input._value = "18:00"
-    modal.reminder_days_input._value = "2"
-    interaction = _interaction()
+async def test_the_setup_modal_hands_a_draft_to_the_confirm_view(bot: StdBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Valid input leads to the options view; nothing is saved yet."""
+    modal = RecurringSetupModal(bot)
+    _typed(monkeypatch, modal, name="Game night", day="Friday", time="18:00", reminder="2")
+    interaction = make_interaction()
 
     await modal.on_submit(interaction)
 
-    view = interaction.response.send_message.await_args.kwargs["view"]
-    assert isinstance(view, RecurringRoleConfirmView)
+    view: Any = interaction.response.send_message.await_args.kwargs["view"]
+    assert isinstance(view, RecurringConfirmView)
     assert (view.draft.event_name, view.draft.post_weekday, view.draft.post_hour) == ("Game night", 4, 18)
     assert (view.draft.creator_id, view.draft.guild_id, view.draft.channel_id) == (1, 2, 3)
     assert view.draft.reminder_days_before == 2
-    assert not active_recurring_configs  # nothing is saved until the user confirms
+    assert not bot.state.recurring
+    assert not load_recurring()
 
 
-async def test_confirming_saves_the_draft_with_the_picked_options():
-    draft = RecurringPollConfig("Game night", "", 1, 2, 3, 4, 18, 0, "UTC", reminder_days_before=2)
-    view = RecurringRoleConfirmView(draft)
-    view.selected_role_id, view.expected_ids, view.expected_role_id = 55, [10, 11], 66
+async def test_confirming_saves_the_draft_with_the_picked_options(bot: StdBot) -> None:
+    """The picked role, people and toggle land on the saved config, which is tracked."""
+    view = RecurringConfirmView(bot, make_draft(reminder_days_before=2))
+    view.mention_role_id, view.expected_ids, view.expected_role_id = 55, [10, 11], 66
     view.allow_cannot_attend = False
-    interaction = _interaction()
+    interaction = make_interaction()
 
-    await view._on_confirm(interaction)
+    await view.commit_button.callback(interaction)
 
-    [stored] = load_recurring_polls()
-    assert stored.id == draft.id
+    [stored] = load_recurring().values()
     assert (stored.mention_role_id, stored.expected_respondent_ids, stored.expected_role_id) == (55, [10, 11], 66)
     assert stored.allow_cannot_attend is False
-    assert active_recurring_configs[stored.id] is draft
+    assert bot.state.recurring[stored.id] == stored
     message = interaction.response.edit_message.await_args.kwargs["content"]
     assert "Pings <@&55>" in message
     assert "2 listed member(s) and everyone in <@&66>" in message

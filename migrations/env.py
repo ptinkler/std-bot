@@ -1,8 +1,11 @@
+"""Alembic environment: run migrations against the bot's SQLite database."""
+
 from logging.config import fileConfig
 
 from alembic import context
 
-from db import Base, engine
+from std_bot.database.engine import get_engine
+from std_bot.database.tables import Base
 
 config = context.config
 
@@ -13,7 +16,8 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = str(engine.url)
+    """Run migrations without a connection, emitting SQL."""
+    url = str(get_engine().url)
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -25,7 +29,8 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    with engine.connect() as connection:
+    """Run migrations against a live connection."""
+    with get_engine().connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
