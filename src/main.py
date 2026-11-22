@@ -27,14 +27,7 @@ from persistence import (
 )
 from ui import PollTypeView, PollView
 
-load_dotenv()
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
-
-TOKEN = os.getenv("DISCORD_TOKEN")
-if TOKEN is None:
-    raise ValueError("DISCORD_TOKEN environment variable not found")
 
 
 @bot.tree.command(
@@ -218,4 +211,16 @@ async def on_ready():
     log.info("connected: %s", bot.user)
 
 
-bot.run(TOKEN)
+def main() -> None:
+    """Configure logging, read the token and run the bot until it is stopped."""
+    load_dotenv()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    token = os.getenv("DISCORD_TOKEN")
+    if token is None:
+        msg = "DISCORD_TOKEN environment variable not found"
+        raise ValueError(msg)
+    bot.run(token)
+
+
+if __name__ == "__main__":
+    main()
