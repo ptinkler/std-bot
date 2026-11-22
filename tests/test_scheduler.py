@@ -3,10 +3,9 @@
 import importlib
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
-import discord
 import pytest
 
 from models import PollData, RecurringPollConfig, active_polls, active_recurring_configs
@@ -14,9 +13,8 @@ from persistence import load_polls, load_recurring_polls, save_poll, save_recurr
 
 
 @pytest.fixture
-def main(monkeypatch):
-    """Import main.py without connecting to Discord (it calls bot.run at import time)."""
-    monkeypatch.setattr(discord.Client, "run", lambda *_a, **_k: None)
+def main():
+    """main.py, imported without starting the bot (that only happens in main.main())."""
     return importlib.import_module("main")
 
 
@@ -222,3 +220,17 @@ async def test_one_broken_config_does_not_stop_the_others(main, monkeypatch):
     _freeze(monkeypatch, main, datetime(2026, 11, 27, 18, 0, tzinfo=timezone.utc))
     await main.check_recurring_polls.coro()
     post.assert_awaited_once_with(good, "2026-W48")
+
+
+def test_main_needs_a_token_and_runs_the_bot_with_it(main, monkeypatch):
+    run = MagicMock()
+    monkeypatch.setattr(main.bot, "run", run)
+    monkeypatch.setattr(main, "load_dotenv", lambda: None)  # a local .env must not supply the token
+    monkeypatch.delenv("DISCORD_TOKEN")
+    with pytest.raises(ValueError, match="DISCORD_TOKEN"):
+        main.main()
+    run.assert_not_called()
+
+    monkeypatch.setenv("DISCORD_TOKEN", "abc")
+    main.main()
+    run.assert_called_once_with("abc")
