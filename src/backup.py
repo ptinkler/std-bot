@@ -101,4 +101,6 @@ def start_backups() -> None:
         return
     if not _backup_if_due.is_running():
         _backup_if_due.start()
-        log.info("database backups every %g h, keeping %d, in %s", interval_seconds() / 3600, keep_count(), backup_dir())
+        log.info(
+            "database backups every %g h, keeping %d, in %s", interval_seconds() / 3600, keep_count(), backup_dir()
+        )

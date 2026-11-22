@@ -25,7 +25,6 @@ from persistence import (
     update_recurring_after_post,
     update_recurring_reminded,
 )
-
 from ui import PollTypeView, PollView
 
 load_dotenv()
@@ -38,7 +37,9 @@ if TOKEN is None:
     raise ValueError("DISCORD_TOKEN environment variable not found")
 
 
-@bot.tree.command(name="std", description="Create a one-time or weekly recurring availability poll. Use /std-help for details.")
+@bot.tree.command(
+    name="std", description="Create a one-time or weekly recurring availability poll. Use /std-help for details."
+)
 async def std_command(interaction: discord.Interaction):
     await interaction.response.send_message("What type of poll?", view=PollTypeView(), ephemeral=True)
 
@@ -73,7 +74,7 @@ async def std_help_command(interaction: discord.Interaction):
         inline=False,
     )
     embed.add_field(
-        name="🚫 \"Can't make any\" option",
+        name='🚫 "Can\'t make any" option',
         value=(
             "Both poll types can offer a **Can't make any** button (toggle it on/off when creating).\n"
             "Ticking it counts as responding, so expected respondents who genuinely can't "
@@ -196,7 +197,7 @@ async def check_recurring_polls():
             ):
                 await _post_recurring_poll(config, iso_week)
             await _send_reminders(config, now_local)
-        except Exception:
+        except Exception:  # noqa: PERF203 - one broken config must not stop the others
             log.exception("error in recurring poll check id=%d", config_id)
 
 

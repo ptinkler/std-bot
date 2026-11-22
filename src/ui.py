@@ -1,16 +1,82 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from datetime import time as dtime
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 import discord
 
 from bot_instance import bot
-from helpers import POLL_OPEN_DAYS, WEEKDAY_NAMES, build_closed_poll_embed, build_poll_embed, date_label, fmt_date, parse_reminder_days, parse_time, parse_weekday, resolve_expected_ids, upcoming_days
+from helpers import (
+    POLL_OPEN_DAYS,
+    WEEKDAY_NAMES,
+    build_poll_embed,
+    date_label,
+    fmt_date,
+    parse_reminder_days,
+    parse_time,
+    parse_weekday,
+    resolve_expected_ids,
+    upcoming_days,
+)
 from models import TIMEZONES, PollData, RecurringPollConfig, active_polls, active_recurring_configs
 from persistence import delete_poll, delete_recurring, save_poll, save_recurring, update_recurring
 
 log = logging.getLogger(__name__)
+
+
+class _Schedule(NamedTuple):
+    weekday: int
+    time: dtime
+    reminder_days: int
+
+
+async def _parse_schedule(
+    interaction: discord.Interaction, day: str, time: str, reminder: str, *, suffix: str = ""
+) -> _Schedule | None:
+    """Parse the three schedule inputs shared by the create and edit modals.
+
+    On bad input, tells the user (ephemerally) which field failed and returns None.
+    """
+    weekday = parse_weekday(day)
+    if weekday is None:
+        await interaction.response.send_message(
+            f"Couldn't parse day. Use e.g. `Monday`, `Mon`, `Thurs`.{suffix}", ephemeral=True
+        )
+        return None
+    t = parse_time(time)
+    if t is None:
+        await interaction.response.send_message(
+            f"Couldn't parse time. Use e.g. `18:00`, `1800`, or `6:00 PM`.{suffix}", ephemeral=True
+        )
+        return None
+    reminder_days = parse_reminder_days(reminder)
+    if reminder_days is None:
+        await interaction.response.send_message(
+            f"Reminder lead time must be a whole number of days from 1 to {POLL_OPEN_DAYS - 1} "
+            f"(the poll is open for {POLL_OPEN_DAYS} days). No changes saved.",
+            ephemeral=True,
+        )
+        return None
+    return _Schedule(weekday, t, reminder_days)
+
+
+def _on_off(flag: bool) -> str:
+    return "ON" if flag else "OFF"
+
+
+def _who_to_remind(user_ids: list[int], role_id: int | None) -> list[str]:
+    """Human-readable parts of "who gets reminded", for the confirmation messages."""
+    who = []
+    if user_ids:
+        who.append(f"{len(user_ids)} listed member(s)")
+    if role_id:
+        who.append(f"everyone in <@&{role_id}>")
+    return who
+
+
+def _plural_days(days: int) -> str:
+    return "1 day" if days == 1 else f"{days} days"
 
 
 class PollTypeView(discord.ui.View):
@@ -18,15 +84,15 @@ class PollTypeView(discord.ui.View):
         super().__init__(timeout=120)
 
     @discord.ui.button(label="One-time Poll", style=discord.ButtonStyle.primary, row=0)
-    async def one_time(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def one_time(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(EventModal())
 
     @discord.ui.button(label="Weekly Recurring Poll", style=discord.ButtonStyle.secondary, row=0)
-    async def recurring(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def recurring(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(RecurringSetupModal())
 
     @discord.ui.button(label="Manage Recurring Polls", style=discord.ButtonStyle.danger, row=1)
-    async def manage(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def manage(self, interaction: discord.Interaction, _button: discord.ui.Button):
         guild_configs = [c for c in active_recurring_configs.values() if c.guild_id == interaction.guild_id]
         if not guild_configs:
             await interaction.response.send_message("No recurring polls set up in this server.", ephemeral=True)
@@ -61,27 +127,13 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        weekday = parse_weekday(str(self.post_day))
-        if weekday is None:
-            await interaction.response.send_message(
-                "Couldn't parse day. Use e.g. `Monday`, `Mon`, `Thurs`.", ephemeral=True
-            )
+        schedule = await _parse_schedule(
+            interaction, str(self.post_day), str(self.post_time_input), str(self.reminder_days_input)
+        )
+        if schedule is None:
             return
-        t = parse_time(str(self.post_time_input))
-        if t is None:
-            await interaction.response.send_message(
-                "Couldn't parse time. Use e.g. `18:00`, `1800`, or `6:00 PM`.", ephemeral=True
-            )
-            return
-        reminder_days = parse_reminder_days(str(self.reminder_days_input))
-        if reminder_days is None:
-            await interaction.response.send_message(
-                f"Reminder lead time must be a whole number of days from 1 to {POLL_OPEN_DAYS - 1} "
-                f"(the poll is open for {POLL_OPEN_DAYS} days). No changes saved.",
-                ephemeral=True,
-            )
-            return
-        view = RecurringRoleConfirmView(
+        weekday, t, reminder_days = schedule
+        draft = RecurringPollConfig(
             event_name=str(self.event_name),
             description=str(self.description or ""),
             creator_id=interaction.user.id,
@@ -90,28 +142,23 @@ class RecurringSetupModal(discord.ui.Modal, title="Set Up Weekly Recurring Poll"
             post_weekday=weekday,
             post_hour=t.hour,
             post_minute=t.minute,
+            post_timezone="UTC",
             reminder_days_before=reminder_days,
         )
-        day_name = WEEKDAY_NAMES[weekday]
         await interaction.response.send_message(
-            f"**{self.event_name}** — every **{day_name}** at **{t.hour:02d}:{t.minute:02d} UTC**\nOptionally ping a role, then confirm:",
-            view=view,
+            f"**{draft.event_name}** — every **{WEEKDAY_NAMES[weekday]}** at **{t.hour:02d}:{t.minute:02d} UTC**\n"
+            "Optionally ping a role, then confirm:",
+            view=RecurringRoleConfirmView(draft),
             ephemeral=True,
         )
 
 
 class RecurringRoleConfirmView(discord.ui.View):
-    def __init__(self, event_name, description, creator_id, guild_id, channel_id, post_weekday, post_hour, post_minute, reminder_days_before=1):
+    """Last step of creating a recurring poll: pick optional roles/people, then save the draft config."""
+
+    def __init__(self, draft: RecurringPollConfig):
         super().__init__(timeout=300)
-        self.event_name = event_name
-        self.description = description
-        self.creator_id = creator_id
-        self.guild_id = guild_id
-        self.channel_id = channel_id
-        self.post_weekday = post_weekday
-        self.post_hour = post_hour
-        self.post_minute = post_minute
-        self.reminder_days_before = reminder_days_before
+        self.draft = draft
         self.selected_role_id: int | None = None
         self.expected_ids: list[int] = []
         self.expected_role_id: int | None = None
@@ -145,16 +192,14 @@ class RecurringRoleConfirmView(discord.ui.View):
         self.add_item(self.expected_role_select)
 
         self.cannot_toggle = discord.ui.Button(
-            label="🚫 \"Can't make any\" option: ON",
+            label='🚫 "Can\'t make any" option: ON',
             style=discord.ButtonStyle.secondary,
             row=3,
         )
         self.cannot_toggle.callback = self._on_toggle_cannot
         self.add_item(self.cannot_toggle)
 
-        self.confirm_btn = discord.ui.Button(
-            label="Confirm & Save", style=discord.ButtonStyle.success, row=4
-        )
+        self.confirm_btn = discord.ui.Button(label="Confirm & Save", style=discord.ButtonStyle.success, row=4)
         self.confirm_btn.callback = self._on_confirm
         self.add_item(self.confirm_btn)
 
@@ -172,52 +217,33 @@ class RecurringRoleConfirmView(discord.ui.View):
 
     async def _on_toggle_cannot(self, interaction: discord.Interaction):
         self.allow_cannot_attend = not self.allow_cannot_attend
-        self.cannot_toggle.label = f"🚫 \"Can't make any\" option: {'ON' if self.allow_cannot_attend else 'OFF'}"
+        self.cannot_toggle.label = f'🚫 "Can\'t make any" option: {_on_off(self.allow_cannot_attend)}'
         await interaction.response.edit_message(view=self)
 
     async def _on_confirm(self, interaction: discord.Interaction):
-        config = RecurringPollConfig(
-            event_name=self.event_name,
-            description=self.description,
-            creator_id=self.creator_id,
-            guild_id=self.guild_id,
-            channel_id=self.channel_id,
-            post_weekday=self.post_weekday,
-            post_hour=self.post_hour,
-            post_minute=self.post_minute,
-            post_timezone="UTC",
-            mention_role_id=self.selected_role_id,
-            expected_respondent_ids=self.expected_ids,
-            expected_role_id=self.expected_role_id,
-            allow_cannot_attend=self.allow_cannot_attend,
-            reminder_days_before=self.reminder_days_before,
-        )
-        config_id = save_recurring(config)
-        config.id = config_id
-        active_recurring_configs[config_id] = config
-        day_name = WEEKDAY_NAMES[self.post_weekday]
-        log.info("recurring poll saved id=%d name=%s", config_id, self.event_name)
+        config = self.draft
+        config.mention_role_id = self.selected_role_id
+        config.expected_respondent_ids = self.expected_ids
+        config.expected_role_id = self.expected_role_id
+        config.allow_cannot_attend = self.allow_cannot_attend
+        config.id = save_recurring(config)
+        active_recurring_configs[config.id] = config
+        log.info("recurring poll saved id=%d name=%s", config.id, config.event_name)
         role_note = f" Pings <@&{self.selected_role_id}>." if self.selected_role_id else ""
-        if self.expected_ids or self.expected_role_id:
-            who = []
-            if self.expected_ids:
-                who.append(f"{len(self.expected_ids)} listed member(s)")
-            if self.expected_role_id:
-                who.append(f"everyone in <@&{self.expected_role_id}>")
-            lead = self.reminder_days_before
-            lead_str = "1 day" if lead == 1 else f"{lead} days"
-            expected_note = f"\n⏳ Will remind {' and '.join(who)} who haven't responded {lead_str} before each reset."
-        else:
-            expected_note = ""
+        who = _who_to_remind(self.expected_ids, self.expected_role_id)
+        expected_note = (
+            f"\n⏳ Will remind {' and '.join(who)} who haven't responded "
+            f"{_plural_days(config.reminder_days_before)} before each reset."
+            if who
+            else ""
+        )
         await interaction.response.edit_message(
             content=(
-                f"✅ **{self.event_name}** saved! Posts every **{day_name}** at "
-                f"**{self.post_hour:02d}:{self.post_minute:02d} UTC** in this channel.{role_note}{expected_note}"
+                f"✅ **{config.event_name}** saved! Posts every **{WEEKDAY_NAMES[config.post_weekday]}** at "
+                f"**{config.post_hour:02d}:{config.post_minute:02d} UTC** in this channel.{role_note}{expected_note}"
             ),
             view=None,
         )
-
-
 
 
 class ManageRecurringView(discord.ui.View):
@@ -259,7 +285,10 @@ class ManageRecurringView(discord.ui.View):
             opt.default = opt.value == str(config_id)
         day_name = WEEKDAY_NAMES[self.selected.post_weekday]
         await interaction.response.edit_message(
-            content=f"Selected: **{self.selected.event_name}** — every {day_name} at {self.selected.post_hour:02d}:{self.selected.post_minute:02d}",
+            content=(
+                f"Selected: **{self.selected.event_name}** — every {day_name} at "
+                f"{self.selected.post_hour:02d}:{self.selected.post_minute:02d}"
+            ),
             view=self,
         )
 
@@ -296,9 +325,7 @@ class RecurringScheduleEditModal(discord.ui.Modal, title="Edit Name & Schedule")
     def __init__(self, config: RecurringPollConfig):
         super().__init__()
         self.config = config
-        self.name_input = discord.ui.TextInput(
-            label="Poll Name", max_length=100, default=config.event_name
-        )
+        self.name_input = discord.ui.TextInput(label="Poll Name", max_length=100, default=config.event_name)
         self.desc_input = discord.ui.TextInput(
             label="Description (optional)",
             required=False,
@@ -331,26 +358,16 @@ class RecurringScheduleEditModal(discord.ui.Modal, title="Edit Name & Schedule")
         self.add_item(self.reminder_days_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        weekday = parse_weekday(str(self.day_input))
-        if weekday is None:
-            await interaction.response.send_message(
-                "Couldn't parse day. Use e.g. `Monday`, `Mon`, `Thurs`. No changes saved.", ephemeral=True
-            )
+        schedule = await _parse_schedule(
+            interaction,
+            str(self.day_input),
+            str(self.time_input),
+            str(self.reminder_days_input),
+            suffix=" No changes saved.",
+        )
+        if schedule is None:
             return
-        t = parse_time(str(self.time_input))
-        if t is None:
-            await interaction.response.send_message(
-                "Couldn't parse time. Use e.g. `18:00`, `1800`, or `6:00 PM`. No changes saved.", ephemeral=True
-            )
-            return
-        reminder_days = parse_reminder_days(str(self.reminder_days_input))
-        if reminder_days is None:
-            await interaction.response.send_message(
-                f"Reminder lead time must be a whole number of days from 1 to {POLL_OPEN_DAYS - 1} "
-                f"(the poll is open for {POLL_OPEN_DAYS} days). No changes saved.",
-                ephemeral=True,
-            )
-            return
+        weekday, t, reminder_days = schedule
         self.config.event_name = str(self.name_input)
         self.config.description = str(self.desc_input or "")
         self.config.post_weekday = weekday
@@ -359,12 +376,10 @@ class RecurringScheduleEditModal(discord.ui.Modal, title="Edit Name & Schedule")
         self.config.reminder_days_before = reminder_days
         update_recurring(self.config)
         log.info("recurring poll schedule edited id=%s", self.config.id)
-        day_name = WEEKDAY_NAMES[weekday]
-        lead_str = "1 day" if reminder_days == 1 else f"{reminder_days} days"
         await interaction.response.send_message(
-            f"✅ **{self.config.event_name}** now posts every **{day_name}** at "
-            f"**{t.hour:02d}:{t.minute:02d} UTC**, reminding non-responders {lead_str} before each reset. "
-            f"(Takes effect from the next weekly cycle.)",
+            f"✅ **{self.config.event_name}** now posts every **{WEEKDAY_NAMES[weekday]}** at "
+            f"**{t.hour:02d}:{t.minute:02d} UTC**, reminding non-responders {_plural_days(reminder_days)} "
+            f"before each reset. (Takes effect from the next weekly cycle.)",
             ephemeral=True,
         )
 
@@ -413,16 +428,14 @@ class RecurringEditView(discord.ui.View):
         self.add_item(self.mention_role_select)
 
         self.cannot_toggle = discord.ui.Button(
-            label=f"🚫 Can't-make-any: {'ON' if self.allow_cannot_attend else 'OFF'}",
+            label=f"🚫 Can't-make-any: {_on_off(self.allow_cannot_attend)}",
             style=discord.ButtonStyle.secondary,
             row=3,
         )
         self.cannot_toggle.callback = self._on_toggle_cannot
         self.add_item(self.cannot_toggle)
 
-        self.schedule_btn = discord.ui.Button(
-            label="Edit Name & Schedule", style=discord.ButtonStyle.secondary, row=3
-        )
+        self.schedule_btn = discord.ui.Button(label="Edit Name & Schedule", style=discord.ButtonStyle.secondary, row=3)
         self.schedule_btn.callback = self._on_schedule
         self.add_item(self.schedule_btn)
 
@@ -450,7 +463,7 @@ class RecurringEditView(discord.ui.View):
 
     async def _on_toggle_cannot(self, interaction: discord.Interaction):
         self.allow_cannot_attend = not self.allow_cannot_attend
-        self.cannot_toggle.label = f"🚫 Can't-make-any: {'ON' if self.allow_cannot_attend else 'OFF'}"
+        self.cannot_toggle.label = f"🚫 Can't-make-any: {_on_off(self.allow_cannot_attend)}"
         await interaction.response.edit_message(view=self)
 
     async def _on_schedule(self, interaction: discord.Interaction):
@@ -462,7 +475,12 @@ class RecurringEditView(discord.ui.View):
         self.config.mention_role_id = self.mention_role_id
         self.config.allow_cannot_attend = self.allow_cannot_attend
         update_recurring(self.config)
-        log.info("recurring poll edited id=%s expected_users=%d role=%s", self.config.id, len(self.expected_ids), self.expected_role_id)
+        log.info(
+            "recurring poll edited id=%s expected_users=%d role=%s",
+            self.config.id,
+            len(self.expected_ids),
+            self.expected_role_id,
+        )
 
         # Apply the new expected set + can't-attend option to the currently-open poll,
         # if any, so its "waiting on" line and buttons stay accurate between resets.
@@ -484,16 +502,11 @@ class RecurringEditView(discord.ui.View):
                 except discord.HTTPException:
                     pass
 
-        who = []
-        if self.expected_ids:
-            who.append(f"{len(self.expected_ids)} listed member(s)")
-        if self.expected_role_id:
-            who.append(f"everyone in <@&{self.expected_role_id}>")
-        who_str = " and ".join(who) if who else "nobody (reminders off)"
+        who_str = " and ".join(_who_to_remind(self.expected_ids, self.expected_role_id)) or "nobody (reminders off)"
         await interaction.response.edit_message(
             content=(
                 f"✅ Updated **{self.config.event_name}** — reminders: {who_str}; "
-                f"can't-make-any option {'ON' if self.allow_cannot_attend else 'OFF'}."
+                f"can't-make-any option {_on_off(self.allow_cannot_attend)}."
             ),
             view=None,
         )
@@ -625,7 +638,7 @@ class DateSelectView(discord.ui.View):
         self.add_item(self.select)
 
         self.cannot_toggle = discord.ui.Button(
-            label=f"🚫 \"Can't make any\" option: {'ON' if allow_cannot_attend else 'OFF'}",
+            label=f'🚫 "Can\'t make any" option: {_on_off(allow_cannot_attend)}',
             style=discord.ButtonStyle.secondary,
             row=1,
         )
@@ -700,9 +713,7 @@ class TimeInputModal(discord.ui.Modal, title="Set Event Time"):
     async def on_submit(self, interaction: discord.Interaction):
         t = parse_time(str(self.event_time))
         if t is None:
-            await interaction.response.send_message(
-                "Couldn't parse time. Use `19:00` or `7:00 PM`.", ephemeral=True
-            )
+            await interaction.response.send_message("Couldn't parse time. Use `19:00` or `7:00 PM`.", ephemeral=True)
             return
         view = TimezoneSelectView(self.poll, self.msg_id, self.date_idx, t)
         await interaction.response.send_message(
@@ -779,9 +790,7 @@ class PollView(discord.ui.View):
         finalize_btn.callback = self._finalize_cb
         self.add_item(finalize_btn)
 
-        cancel_btn = discord.ui.Button(
-            label="Cancel Poll", style=discord.ButtonStyle.danger, custom_id="cancel", row=4
-        )
+        cancel_btn = discord.ui.Button(label="Cancel Poll", style=discord.ButtonStyle.danger, custom_id="cancel", row=4)
         cancel_btn.callback = self._cancel_cb
         self.add_item(cancel_btn)
 
@@ -798,6 +807,7 @@ class PollView(discord.ui.View):
                 log.info("vote_added user=%s poll=%s date=%s", interaction.user.id, self.msg_id, idx)
             save_poll(self.msg_id, self.poll)
             await interaction.response.edit_message(embed=build_poll_embed(self.poll), view=self)
+
         return cb
 
     async def _cannot_attend_cb(self, interaction: discord.Interaction):
@@ -854,7 +864,7 @@ class PollView(discord.ui.View):
     async def _finalize_cb(self, interaction: discord.Interaction):
         view = FinalizeSelectView(self.poll, self.msg_id)
         lines = [
-            f"**{i+1}.** {fmt_date(ts)} — {len(self.poll.votes.get(i, set()))} votes"
+            f"**{i + 1}.** {fmt_date(ts)} — {len(self.poll.votes.get(i, set()))} votes"
             for i, ts in enumerate(self.poll.dates)
         ]
         await interaction.response.send_message(

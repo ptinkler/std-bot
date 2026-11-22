@@ -21,7 +21,8 @@ from persistence import (
 def _poll():
     return PollData(
         "Game night", "bring snacks", 1, 2, 3, [100, 200],
-        votes={0: {10, 11}, 1: set()}, cannot_attend={12}, allow_cannot_attend=False, expected_respondent_ids=[10, 11, 12],
+        votes={0: {10, 11}, 1: set()}, cannot_attend={12}, allow_cannot_attend=False,
+        expected_respondent_ids=[10, 11, 12],
     )  # fmt: skip
 
 
@@ -101,7 +102,11 @@ def test_recurring_progress_markers():
     update_recurring_after_post(config_id, "2026-W47", 4242)
     update_recurring_reminded(config_id, "2026-W48")
     [loaded] = load_recurring_polls()
-    assert (loaded.last_posted_week, loaded.last_poll_msg_id, loaded.last_reminded_week) == ("2026-W47", 4242, "2026-W48")
+    assert (loaded.last_posted_week, loaded.last_poll_msg_id, loaded.last_reminded_week) == (
+        "2026-W47",
+        4242,
+        "2026-W48",
+    )
 
 
 def test_recurring_with_nothing_expected_and_zero_reminder_days():
