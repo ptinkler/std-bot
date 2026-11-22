@@ -59,14 +59,33 @@ pip install uv
 uv sync
 cp .env.example .env
 # edit .env
-.venv/bin/python main.py
+PYTHONPATH=src .venv/bin/python -m std_bot
 ```
 
-## Tests
+Or `make run`.
+
+## Code layout
+
+The code is the `std_bot` package in `src/`:
+
+| Package | Contents |
+|---|---|
+| `domain/` | Polls, recurring configs, voting rules and schedule arithmetic; no Discord or database code |
+| `database/`, `storage/` | SQLAlchemy engine and tables, and reading/writing polls |
+| `ui/` | Views, modals and buttons (`ui/recurring/` and `ui/finalize/` are the multi-step flows) |
+| `scheduler/` | The minute loop that posts recurring polls and sends reminders |
+| `backup/` | Scheduled database backups |
+| `commands/` | Slash commands |
+
+Schema changes go through Alembic (`migrations/`); the container runs `alembic upgrade head` on start.
+
+## Tests and code standards
 
 ```bash
-uv sync                  # includes the dev group (pytest)
-.venv/bin/pytest
+uv sync                  # includes the dev group
+make test                # pytest
+make lint                # ruff check, ruff format --check, basedpyright
+make format              # apply ruff fixes and formatting
 ```
 
-CI runs the same suite inside the built Docker image on every pull request, so base-image and dependency bumps are tested against what production runs.
+Ruff runs with a broad rule set and basedpyright in strict mode, with no `noqa` or `type: ignore` comments. CI runs lint and the tests inside the built Docker image on every pull request, so base-image and dependency bumps are tested against what production runs.

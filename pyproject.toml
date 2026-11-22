@@ -1,7 +1,7 @@
 [project]
 name = "std-bot"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.20.1",
     "discord-py==2.7.1",
@@ -11,6 +11,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.40.2",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "ruff>=0.17.6",
@@ -23,20 +24,102 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
+target-version = "py313"
 line-length = 120
-target-version = "py310"
-extend-exclude = ["migrations/versions"]
+src = ["src", "."]
+namespace-packages = ["migrations"]
 
 [tool.ruff.lint]
 select = [
-    "E", "W", "F", "I", "N", "B", "UP", "SIM", "C4", "RUF", "PL", "PERF",
-    "PT", "TRY", "ASYNC", "S", "ARG", "RET", "PIE", "BLE", "T20",
-]
-ignore = [
-    "PLR2004",  # magic numbers: Discord limits and calendar constants read fine inline
-    "TRY003",   # long messages in exceptions
-    "RUF001", "RUF002",  # deliberate typographic characters (en dash, union sign) in user-facing text
+    "A",        # flake8-builtins: no name shadows a Python builtin
+    "ANN",      # flake8-annotations: type hints everywhere
+    "ARG",      # unused function parameters
+    "ASYNC",    # blocking calls inside async def
+    "B",        # bugbear: likely bugs
+    "BLE",      # blind except
+    "C4",       # comprehensions
+    "C90",      # function complexity (mccabe)
+    "COM",      # trailing commas
+    "D",        # pydocstyle
+    "DTZ",      # timezone-aware datetimes only
+    "E",        # pycodestyle errors
+    "EM",       # exception messages are assigned to a variable first
+    "ERA",      # commented-out code
+    "EXE",      # shebang / executable bit consistency
+    "F",        # pyflakes
+    "FBT",      # boolean flag arguments are keyword-only
+    "FIX",      # no FIXME / TODO / XXX comments left in code
+    "FLY",      # static str.join -> f-string
+    "FURB",     # refurb: dated idioms
+    "G",        # logging calls: no f-strings, no str.format
+    "I",        # import sorting
+    "ICN",      # conventional import aliases
+    "INP",      # every folder with Python files is a package
+    "INT",      # gettext misuse
+    "ISC",      # implicit string concatenation
+    "LOG",      # logging misuse
+    "N",        # pep8-naming
+    "PERF",     # avoidable overhead
+    "PGH",      # specific error codes on type: ignore comments
+    "PIE",      # unnecessary code
+    "PL",       # pylint: convention, error, refactor and warning rules
+    "PT",       # pytest style
+    "PTH",      # pathlib over os.path
+    "PYI",      # modern typing conventions
+    "Q",        # quotes
+    "RET",      # return statement consistency
+    "RSE",      # unnecessary parentheses on raise
+    "RUF",      # ruff-specific; RUF100 flags a noqa that suppresses nothing
+    "S",        # bandit: security
+    "SIM",      # simplifications
+    "SLF",      # reaching into another module's _private names
+    "SLOT",     # __slots__ on str/tuple/namedtuple subclasses
+    "T10",      # debugger calls
+    "T20",      # print()
+    "TC",       # imports only needed for type checking
+    "TD",       # well-formed TODO comments
+    "TID",      # tidy imports: absolute only
+    "TRY",      # tryceratops: clean exception handling
+    "UP",       # pyupgrade
+    "W",        # pycodestyle warnings
 ]
 
+ignore = [
+    "COM812",   # conflicts with the formatter
+    "ISC001",   # conflicts with the formatter
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 7
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = false
+suppress-dummy-args = true
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+known-first-party = ["std_bot", "tests"]
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR0913", "PLC0415", "SLF001", "ARG001", "E402"]
+# Tests only:
+# - S101: assert is how pytest tests express checks.
+# - ANN: basedpyright strict already requires annotations; no double-reporting.
+# - ARG: fixtures requested for their side effects and stand-ins that must match a replaced signature.
+# - PLR0913: a test's arguments are the pytest fixtures it requests; there is nothing to group.
+# - PLR2004: tests assert exact counts and values; naming each expected number would only obscure them.
+# - FBT: test helpers take plain booleans for readability.
+"tests/*" = ["S101", "ANN", "ARG", "PLR0913", "PLR2004", "FBT"]
+
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "lf"
+
+[tool.basedpyright]
+typeCheckingMode = "strict"
+include = ["src", "tests", "migrations"]
+extraPaths = ["src"]
